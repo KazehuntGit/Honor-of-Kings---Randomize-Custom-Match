@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Honor of Kings - Team Scrim</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Inter:wght@300;400;600&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              hok: {
+                gold: '#dcb06b',
+                goldLight: '#f3dcb1',
+                goldDark: '#8a6d3b',
+                blue: '#0a1a2f',
+                blueDark: '#05090f',
+                red: '#c02d2d',
+                cyan: '#00d2ff',
+              }
+            },
+            fontFamily: {
+              cinzel: ['Cinzel', 'serif'],
+              inter: ['Inter', 'sans-serif'],
+              orbitron: ['Orbitron', 'sans-serif'],
+            },
+            animation: {
+              'spin-slow': 'spin 8s linear infinite',
+              'spin-reverse-slow': 'spin-reverse 10s linear infinite',
+              'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'float': 'float 6s ease-in-out infinite',
+            },
+            keyframes: {
+              'spin-reverse': {
+                '0%': { transform: 'rotate(360deg)' },
+                '100%': { transform: 'rotate(0deg)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #05090f;
+        color: #e2e8f0;
+        overflow-x: hidden;
+      }
+      
+      .hok-gold-text {
+        background: linear-gradient(to bottom, #f3dcb1, #dcb06b);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      }
+
+      .clip-corner-sm {
+        clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+      }
+
+      .clip-corner-md {
+        clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
+      }
+      
+      .clip-diamond {
+         clip-path: polygon(20% 0%, 80% 0%, 100% 50%, 80% 100%, 20% 100%, 0% 50%);
+      }
+
+      .tech-border {
+        position: relative;
+      }
+      .tech-border::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        border: 1px solid rgba(220, 176, 107, 0.2);
+        clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
+        pointer-events: none;
+      }
+      .tech-border::after {
+        content: '';
+        position: absolute;
+        bottom: -2px; right: -2px;
+        width: 10px; height: 10px;
+        border-right: 2px solid #dcb06b;
+        border-bottom: 2px solid #dcb06b;
+        pointer-events: none;
+      }
+
+      @keyframes slide-in-bottom {
+        0% { transform: translateY(50px); opacity: 0; }
+        100% { transform: translateY(0); opacity: 1; }
+      }
+      .animate-slide-in {
+        animation: slide-in-bottom 0.5s ease-out forwards;
+      }
+
+      .animate-float {
+        animation: float 6s ease-in-out infinite;
+      }
+      @keyframes float {
+        0% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+        100% { transform: translateY(0px); }
+      }
+
+      /* Clash Battle Animations */
+      @keyframes clash-shake {
+        0%, 100% { transform: translate(0, 0); }
+        10%, 30%, 50%, 70%, 90% { transform: translate(-10px, -10px); }
+        20%, 40%, 60%, 80% { transform: translate(10px, 10px); }
+      }
+
+      @keyframes impact-flash {
+        0% { opacity: 0; }
+        10% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+
+      @keyframes lightning {
+        0%, 100% { opacity: 0; }
+        10%, 90% { opacity: 0; }
+        50% { opacity: 1; }
+      }
+      .animate-lightning {
+        animation: lightning 3s infinite;
+      }
+
+      /* Victory Animations */
+      @keyframes trophy-pop {
+        0% { transform: scale(0) rotate(-10deg); opacity: 0; }
+        60% { transform: scale(1.1) rotate(5deg); opacity: 1; }
+        100% { transform: scale(1) rotate(0deg); opacity: 1; }
+      }
+      .animate-trophy-pop {
+        animation: trophy-pop 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+      }
+
+      @keyframes confetti-fall {
+        0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+        100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+      }
+      .confetti-piece {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: #dcb06b;
+        top: -10px;
+        animation: confetti-fall 4s linear infinite;
+      }
+      
+      .animate-spin-slow {
+        animation: spin 3s linear infinite;
+      }
+
+      /* --- NEW ANIMATIONS --- */
+
+      /* Fog / Mist */
+      @keyframes fog-move {
+        0% { transform: translateX(-10%); opacity: 0.3; }
+        50% { transform: translateX(10%); opacity: 0.6; }
+        100% { transform: translateX(-10%); opacity: 0.3; }
+      }
+      .animate-fog {
+        animation: fog-move 20s ease-in-out infinite;
+      }
+
+      /* Rising Embers */
+      @keyframes rise {
+        0% { transform: translateY(100vh) scale(0); opacity: 0; }
+        50% { opacity: 0.8; }
+        100% { transform: translateY(-10vh) scale(1); opacity: 0; }
+      }
+      .particle-ember {
+        position: absolute;
+        bottom: -20px;
+        background: radial-gradient(circle, #dcb06b 0%, transparent 70%);
+        border-radius: 50%;
+        pointer-events: none;
+        animation: rise linear infinite;
+      }
+
+      /* God Rays */
+      @keyframes rotate-rays {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      .god-rays {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 150vmax;
+        height: 150vmax;
+        background: repeating-conic-gradient(
+          from 0deg,
+          rgba(220, 176, 107, 0.05) 0deg,
+          rgba(220, 176, 107, 0) 10deg,
+          rgba(220, 176, 107, 0.05) 20deg
+        );
+        transform-origin: center;
+        translate: -50% -50%;
+        animation: rotate-rays 60s linear infinite;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      /* 3D Tilt Card Effect */
+      .perspective-container {
+        perspective: 1000px;
+      }
+      .tilt-card {
+        transition: transform 0.2s ease-out;
+        transform-style: preserve-3d;
+      }
+      .tilt-card:hover {
+        transform: rotateX(5deg) rotateY(5deg) scale(1.02);
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.1/",
+    "react": "https://esm.sh/react@^19.2.1",
+    "react/": "https://esm.sh/react@^19.2.1/",
+    "react-dom": "https://esm.sh/react-dom@^19.2.3"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

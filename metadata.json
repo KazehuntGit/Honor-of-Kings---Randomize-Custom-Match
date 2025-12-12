@@ -1,0 +1,5 @@
+{
+  "name": "HoK - Custom Fun Match Randomizer",
+  "description": "A team generator for Honor of Kings that balances teams based on player roles with a dramatic reveal animation.",
+  "requestFramePermissions": []
+}
