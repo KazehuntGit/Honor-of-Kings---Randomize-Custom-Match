@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MatchResult, TeamSlot, Role, Player } from '../types';
 import { RoleIcons, ROLES_ORDER } from '../constants';
 import { Button } from './Button';
@@ -11,17 +11,31 @@ import { EvaluationScreen } from './EvaluationScreen';
 interface MatchDisplayProps {
   match: MatchResult;
   activePlayers: Player[]; 
+  initialMode: 'draft' | 'battle';
   onReset: () => void; // For Abort
   onCompleteMatch: (winner: 'azure' | 'crimson' | null, mvpId?: string, ratings?: Record<string, number>) => void; // For Finish
   onReroll: (team: 'azure' | 'crimson', role: Role, newPlayer: Player) => void;
+  onStartBattle: () => void; // Triggered when draft is done
 }
 
 type ViewState = 'drafting' | 'transition' | 'final' | 'celebration' | 'evaluation';
 
-export const MatchDisplay: React.FC<MatchDisplayProps> = ({ match, activePlayers, onReset, onCompleteMatch, onReroll }) => {
+export const MatchDisplay: React.FC<MatchDisplayProps> = ({ 
+  match, activePlayers, initialMode, 
+  onReset, onCompleteMatch, onReroll, onStartBattle 
+}) => {
   const [viewState, setViewState] = useState<ViewState>('drafting');
   const [winningTeam, setWinningTeam] = useState<'azure' | 'crimson' | null>(null);
   
+  // Set initial state based on props (URL)
+  useEffect(() => {
+     if (initialMode === 'battle') {
+        setViewState('final');
+     } else {
+        setViewState('drafting');
+     }
+  }, [initialMode]);
+
   // Dynamic Role Order: If Coach mode, append Coach to standard order
   const displayRoles = match.isCoachMode ? [...ROLES_ORDER, Role.COACH] : ROLES_ORDER;
 
@@ -43,6 +57,10 @@ export const MatchDisplay: React.FC<MatchDisplayProps> = ({ match, activePlayers
 
   // Tracks which individual cards are visible
   const [revealedCards, setRevealedCards] = useState<Set<string>>(new Set());
+
+  // If loading directly into battle, ensure revealedCards is full? 
+  // No need, because Battle View (MatchSummary) doesn't use revealedCards.
+  // But if we are in draft mode, we start clean.
 
   const getPlayerForRole = (team: TeamSlot[], role: Role) => {
     return team.find(slot => slot.role === role);
@@ -87,16 +105,46 @@ export const MatchDisplay: React.FC<MatchDisplayProps> = ({ match, activePlayers
     const winner = getPlayerForRole(teamSlots, role)?.player;
     if (!winner) return;
 
+    // --- LOGIC START: Identify Revealed Players ---
+    const revealedPlayerIds = new Set<string>();
+    
+    // Check Azure team for revealed players
+    match.azureTeam.forEach(slot => {
+        const cId = getCardId('azure', slot.role);
+        if (revealedCards.has(cId)) {
+            revealedPlayerIds.add(slot.player.id);
+        }
+    });
+
+    // Check Crimson team for revealed players
+    match.crimsonTeam.forEach(slot => {
+        const cId = getCardId('crimson', slot.role);
+        if (revealedCards.has(cId)) {
+            revealedPlayerIds.add(slot.player.id);
+        }
+    });
+    // --- LOGIC END ---
+
     // Get candidates for the wheel
     // STRICT COACH LOGIC: If role is Coach, ONLY allow players with Coach role.
     const candidates = activePlayers
       .filter(p => {
+          // 1. Exclude players who are already visible on the board
+          if (revealedPlayerIds.has(p.id)) return false;
+
+          // 2. Filter by Role compatibility
           if (role === Role.COACH) {
               return p.roles.includes(Role.COACH);
           }
           return p.isAllRoles || p.roles.includes(role);
       })
       .map(p => p.name);
+    
+    // Safety check: Ensure the actual winner is always in the list (in case of weird filtering edge cases)
+    // The winner shouldn't be revealed yet, but this prevents empty wheels.
+    if (!candidates.includes(winner.name)) {
+        candidates.push(winner.name);
+    }
 
     setWheelState({
       isOpen: true,
@@ -171,6 +219,9 @@ export const MatchDisplay: React.FC<MatchDisplayProps> = ({ match, activePlayers
   };
 
   const handleTransitionComplete = () => {
+    // This function tells parent to update URL to /#battle/...
+    onStartBattle();
+    // Local state follows
     setViewState('final');
   };
 
@@ -392,10 +443,13 @@ export const MatchDisplay: React.FC<MatchDisplayProps> = ({ match, activePlayers
         {/* Header Info - PERFECTLY CENTERED */}
         <div className="flex flex-col items-center mb-6 pt-8">
            <div className="flex justify-center w-full mb-4">
-              <div className="bg-[#05090f] border border-[#dcb06b]/40 px-8 py-2 clip-diamond relative shadow-[0_0_15px_rgba(220,176,107,0.2)]">
-                  <div className="absolute inset-0 bg-[#dcb06b]/5 pointer-events-none"></div>
-                  <span className="text-[#dcb06b] font-cinzel font-bold text-xs tracking-widest uppercase block text-center">Room ID</span>
-                  <span className="text-xl font-orbitron font-bold text-white tracking-widest text-center block">{match.roomId}</span>
+              {/* HIGHLIGHTED ROOM ID - GLOWING EFFECT */}
+              <div className="relative group p-[2px] rounded clip-corner-sm">
+                 <div className="absolute inset-0 bg-gradient-to-r from-[#dcb06b] via-[#8a6d3b] to-[#dcb06b] animate-[spin-slow_4s_linear_infinite] opacity-80 blur-sm"></div>
+                 <div className="bg-[#05090f] px-10 py-3 relative z-10 clip-corner-sm border border-[#dcb06b] shadow-[inset_0_0_20px_rgba(220,176,107,0.2)] flex flex-col items-center">
+                    <span className="text-[#dcb06b] font-cinzel font-bold text-xs tracking-widest uppercase block text-center drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]">Room ID</span>
+                    <span className="text-2xl font-orbitron font-bold text-[#f3dcb1] tracking-[0.2em] text-center block drop-shadow-[0_0_5px_#dcb06b]">{match.roomId}</span>
+                 </div>
               </div>
            </div>
 

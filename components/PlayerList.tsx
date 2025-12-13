@@ -219,7 +219,7 @@ export const PlayerList: React.FC<PlayerListProps> = ({ players, onRemove, onTog
                  document.body
               )}
 
-              <div className={`relative group ${glowClass} tilt-card h-full transition-all duration-300`}>
+              <div className={`relative group ${glowClass} tilt-card h-full transition-all duration-300 min-h-[90px]`}>
                 
                 <div className="absolute inset-0 clip-corner-sm overflow-hidden z-0">
                     <div className="absolute inset-0 bg-[#1e3a5f]"></div>
@@ -228,13 +228,13 @@ export const PlayerList: React.FC<PlayerListProps> = ({ players, onRemove, onTog
 
                 <div 
                   className={`
-                    absolute inset-[1px] clip-corner-sm z-10 flex flex-col gap-1 p-2
+                    absolute inset-[1px] clip-corner-sm z-10 flex flex-col p-2
                     ${cardBg}
                     ${!isActive ? 'opacity-50 grayscale hover:opacity-80 transition-opacity' : ''}
                   `}
                 >
                   
-                  <div className="flex justify-between items-start gap-2">
+                  <div className="flex justify-between items-start gap-2 mb-2">
                      
                      <div className="flex-1 min-w-0">
                         {/* Name */}
@@ -256,7 +256,6 @@ export const PlayerList: React.FC<PlayerListProps> = ({ players, onRemove, onTog
 
                         <div className="flex flex-wrap gap-1">
                             {hasCoachRole ? (
-                                // Exclusive Coach Badge - If player is Coach, ONLY show this.
                                 <div className={`px-1.5 py-0.5 border clip-corner-sm ${getRoleBadgeStyle(Role.COACH)}`}>
                                     <span className="text-[7px] uppercase font-bold leading-none whitespace-nowrap opacity-100">
                                         COACH
@@ -293,33 +292,35 @@ export const PlayerList: React.FC<PlayerListProps> = ({ players, onRemove, onTog
                      </div>
                   </div>
 
-                  {/* Stats - ALWAYS Visible */}
-                  <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-mono mt-auto pt-2 border-t border-white/5 ${isActive ? 'text-gray-400' : 'text-[#4a5f78]/50'}`}>
-                      <div className="whitespace-nowrap">
-                        Match: <span className="text-[#f0f4f8]">{stats.matchesPlayed}</span>
+                  {/* Stats - Force visibility with explicit colors and background separation */}
+                  <div className="mt-auto pt-2 border-t border-[#1e3a5f] bg-[#000000]/20 flex items-center justify-between text-[9px] font-mono px-1 pb-0.5 rounded-b-sm">
+                      <div className="flex items-center gap-2">
+                         <span className="text-[#8a9db8]">MATCH:</span>
+                         <span className="text-white font-bold">{stats.matchesPlayed}</span>
                       </div>
-                      <div className="whitespace-nowrap">
-                        WR: <span className={`${winRate >= 60 ? 'text-[#dcb06b]' : winRate >= 50 ? 'text-[#f0f4f8]' : 'text-red-400'}`}>{winRate}%</span>
+                      
+                      <div className="h-3 w-[1px] bg-[#1e3a5f]"></div>
+
+                      <div className="flex items-center gap-2">
+                         <span className="text-[#8a9db8]">WR:</span>
+                         <span className={`font-bold ${winRate >= 60 ? 'text-[#dcb06b]' : winRate >= 50 ? 'text-white' : 'text-red-400'}`}>
+                            {winRate}%
+                         </span>
                       </div>
-                      {streak > 1 && (
-                        <div className="whitespace-nowrap ml-auto">
-                            <span className={`${isGodlike ? 'text-red-500 font-black animate-pulse' : isHot ? 'text-cyan-400 font-bold' : 'text-gray-400'}`}>
-                                {streak} Win Streak
-                            </span>
-                        </div>
-                      )}
                   </div>
+
+                  {/* Streak Overlay (if any) */}
+                  {streak > 1 && isActive && (
+                     <div className={`absolute top-0 right-8 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-wider ${isGodlike ? 'bg-red-900/80 text-red-200' : 'bg-cyan-900/80 text-cyan-200'} clip-corner-sm`}>
+                        {streak} WS
+                     </div>
+                  )}
                   
                   {!isActive && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                       <span className="text-[#0a1a2f] font-black text-xl -rotate-12 opacity-40 uppercase tracking-widest select-none bg-[#dcb06b] px-1 mix-blend-screen">Benched</span>
                     </div>
                   )}
-                </div>
-                
-                <div className="invisible p-2 flex flex-col gap-1 min-h-[72px]">
-                   <div className="text-lg">Placeholder</div>
-                   <div className="text-[7px]">Roles</div>
                 </div>
               </div>
             </React.Fragment>

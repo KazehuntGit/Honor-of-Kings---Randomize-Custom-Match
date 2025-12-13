@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Player, MatchResult, Role, MatchHistoryEntry } from './types';
 import { PlayerForm } from './components/PlayerForm';
 import { PlayerList } from './components/PlayerList';
@@ -43,10 +43,42 @@ const HOK_HEROES = [
   { name: "Yaria", roles: [Role.ROAM] }
 ];
 
+// --- UTILS FOR HASHING ---
+const encodeState = (data: any): string => {
+  try {
+    const json = JSON.stringify(data);
+    // Handle Unicode strings (names) safely for btoa
+    return btoa(encodeURIComponent(json).replace(/%([0-9A-F]{2})/g,
+        function toSolidBytes(match, p1) {
+            return String.fromCharCode(parseInt(p1, 16));
+    }));
+  } catch (e) {
+    console.error("Encoding error", e);
+    return "";
+  }
+};
+
+const decodeState = (str: string): any => {
+  try {
+    const decodedStr = decodeURIComponent(Array.prototype.map.call(atob(str), function(c) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(decodedStr);
+  } catch (e) {
+    console.error("Decoding error", e);
+    return null;
+  }
+};
+
+type ViewMode = 'lobby' | 'match' | 'battle';
+
 export default function App() {
+  const [viewMode, setViewMode] = useState<ViewMode>('lobby');
+  
   const [players, setPlayers] = useState<Player[]>([]);
   const [currentMatch, setCurrentMatch] = useState<MatchResult | null>(null);
   const [matchHistory, setMatchHistory] = useState<MatchHistoryEntry[]>([]);
+  
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [roomId, setRoomId] = useState<string>('');
   const [isCoachMode, setIsCoachMode] = useState(false);
@@ -55,43 +87,112 @@ export default function App() {
   // Edit State
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const rosterFileInputRef = useRef<HTMLInputElement>(null);
   const historyFileInputRef = useRef<HTMLInputElement>(null);
 
-  const addPlayer = (newPlayer: Omit<Player, 'id' | 'isActive' | 'stats'>) => {
-    setPlayers(prev => {
-      // Check if player already exists (case-insensitive normalization)
-      const normalizedName = newPlayer.name.trim().toLowerCase();
-      const existingIndex = prev.findIndex(p => p.name.trim().toLowerCase() === normalizedName);
+  // --- ROUTER & STATE SYNC ---
 
-      if (existingIndex !== -1) {
-        // UPDATE Existing Player Logic
-        const updatedPlayers = [...prev];
-        updatedPlayers[existingIndex] = {
-          ...updatedPlayers[existingIndex],
-          roles: newPlayer.roles,
-          isAllRoles: newPlayer.isAllRoles,
-          // We also ensure they are active if they are being updated/re-added
-          isActive: true 
-        };
-        return updatedPlayers;
+  // 1. Navigation Helper (Writes to URL)
+  const navigate = useCallback((mode: ViewMode, data: any) => {
+    const hash = encodeState(data);
+    // Use replaceState to avoid cluttering history stack too much with every keystroke
+    // But pushState is better for significant view changes.
+    window.location.hash = `${mode}/${hash}`;
+  }, []);
+
+  // 2. Hash Listener (Reads from URL)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.substring(1); // Remove #
+      if (!hash) {
+         setViewMode('lobby');
+         return;
       }
 
-      // CREATE New Player Logic
-      const player: Player = { 
-        ...newPlayer, 
-        id: crypto.randomUUID(),
-        isActive: true, // Default to active when added
-        isLastMatchMvp: false,
-        stats: {
-          matchesPlayed: 0,
-          wins: 0,
-          currentStreak: 0,
-          maxStreak: 0
+      // Format: mode/data
+      const separatorIndex = hash.indexOf('/');
+      if (separatorIndex === -1) return;
+
+      const mode = hash.substring(0, separatorIndex) as ViewMode;
+      const dataStr = hash.substring(separatorIndex + 1);
+      const data = decodeState(dataStr);
+
+      if (!data) return;
+
+      if (mode === 'lobby') {
+         setViewMode('lobby');
+         if (Array.isArray(data)) {
+            setPlayers(data);
+            setCurrentMatch(null);
+         }
+      } else if (mode === 'match') {
+         setViewMode('match');
+         setCurrentMatch(data);
+         // Restore players from match to keep context if needed, or rely on match data
+         if (data.azureTeam && data.crimsonTeam) {
+            // We don't strictly overwrite 'players' here to avoid losing bench players not in the match object
+            // Ideally match object should contain bench, but for now we just render the match.
+         }
+      } else if (mode === 'battle') {
+         setViewMode('battle');
+         setCurrentMatch(data);
+      }
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    handleHashChange(); // Run on mount
+
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  // 3. Auto-Save Lobby State (Debounced)
+  // Only runs when we are strictly in LOBBY mode to avoid overwriting Match URL
+  useEffect(() => {
+    if (viewMode === 'lobby') {
+       const timer = setTimeout(() => {
+          navigate('lobby', players);
+       }, 500);
+       return () => clearTimeout(timer);
+    }
+  }, [players, viewMode, navigate]);
+
+  // --- ACTIONS ---
+
+  const handleBatchProcess = (batchData: { name: string; roles: Role[]; isAllRoles: boolean; action?: 'add' | 'bench' }[]) => {
+    setPlayers(prev => {
+      let updatedPlayers = [...prev];
+      batchData.forEach(item => {
+        const normalizedName = item.name.trim().toLowerCase();
+        const existingIndex = updatedPlayers.findIndex(p => p.name.trim().toLowerCase() === normalizedName);
+
+        if (item.action === 'bench') {
+           if (existingIndex !== -1) {
+              updatedPlayers[existingIndex] = { ...updatedPlayers[existingIndex], isActive: false };
+           }
+        } else {
+           if (existingIndex !== -1) {
+              updatedPlayers[existingIndex] = {
+                 ...updatedPlayers[existingIndex],
+                 roles: item.roles,
+                 isAllRoles: item.isAllRoles,
+                 isActive: true
+              };
+           } else {
+              updatedPlayers.push({
+                 id: crypto.randomUUID(),
+                 name: item.name,
+                 roles: item.roles,
+                 isAllRoles: item.isAllRoles,
+                 isActive: true,
+                 isLastMatchMvp: false,
+                 stats: { matchesPlayed: 0, wins: 0, currentStreak: 0, maxStreak: 0 }
+              });
+           }
         }
-      };
-      return [...prev, player];
+      });
+      return updatedPlayers;
     });
     setErrorMsg(null);
   };
@@ -100,121 +201,111 @@ export default function App() {
     setPlayers(prev => prev.filter(p => p.id !== id));
   };
 
-  const togglePlayerActive = (id: string) => {
-    setPlayers(prev => prev.map(p => 
-      p.id === id ? { ...p, isActive: !p.isActive } : p
-    ));
+  const handleClearAll = () => {
+    if (window.confirm("Are you sure you want to clear the entire roster? This cannot be undone.")) {
+       setPlayers([]);
+       setRoomId('');
+       setErrorMsg(null);
+       navigate('lobby', []);
+    }
   };
 
-  // Edit Handlers
+  const togglePlayerActive = (id: string) => {
+    setPlayers(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
+  };
+
   const handleEditPlayer = (player: Player) => {
     setEditingPlayer(player);
     setIsEditModalOpen(true);
   };
 
   const handleUpdatePlayer = (updatedPlayer: Player) => {
-    setPlayers(prev => prev.map(p => 
-      p.id === updatedPlayer.id ? updatedPlayer : p
-    ));
+    setPlayers(prev => prev.map(p => p.id === updatedPlayer.id ? updatedPlayer : p));
     setErrorMsg(null);
   };
 
   const activePlayers = players.filter(p => p.isActive);
+
+  // --- MATCH ACTIONS ---
 
   const handleGenerate = () => {
     if (!roomId.trim()) {
       setErrorMsg("Please enter a Room ID.");
       return;
     }
-    
     const required = isCoachMode ? 12 : 10;
     if (activePlayers.length < required) {
-      setErrorMsg(`Need ${required} ACTIVE players for ${isCoachMode ? 'Coach' : 'Standard'} Mode. Current Active: ${activePlayers.length}`);
+      setErrorMsg(`Need ${required} ACTIVE players for ${isCoachMode ? 'Coach' : 'Standard'} Mode. Current: ${activePlayers.length}`);
       return;
     }
-
-    // COACH MODE VALIDATION
     if (isCoachMode) {
-       // STRICT: Only players with the explicit COACH role can be coach. 
-       // All Roles/Fill does NOT count for coach slots.
        const coachCandidates = activePlayers.filter(p => p.roles.includes(Role.COACH));
-       
        if (coachCandidates.length < 2) {
-         setErrorMsg(`Coach Mode requires at least 2 players with the specific 'COACH' role. Found: ${coachCandidates.length}`);
+         setErrorMsg(`Coach Mode requires 2 players with 'COACH' role. Found: ${coachCandidates.length}`);
          return;
        }
     }
 
-    // Only pass active players to the matchmaker
     const result = generateMatch(activePlayers, roomId, isCoachMode);
     if (result) {
       setCurrentMatch(result);
       setErrorMsg(null);
+      // Change View to Match
+      navigate('match', result);
     } else {
-      setErrorMsg("Failed to find valid composition. Ensure role coverage.");
+      setErrorMsg("Failed to find valid composition.");
     }
   };
 
   const handleRerollSlot = (team: 'azure' | 'crimson', role: Role, newPlayer: Player) => {
     if (!currentMatch) return;
 
-    // Update Match State with the new player chosen by the wheel
-    setCurrentMatch(prev => {
-       if (!prev) return null;
-       
-       const newAzure = prev.azureTeam.map(slot => {
-          if (team === 'azure' && slot.role === role) {
-             return { ...slot, player: newPlayer };
-          }
-          return slot;
-       });
+    const updatedMatch = {
+        ...currentMatch,
+        azureTeam: currentMatch.azureTeam.map(slot => 
+            (team === 'azure' && slot.role === role) ? { ...slot, player: newPlayer } : slot
+        ),
+        crimsonTeam: currentMatch.crimsonTeam.map(slot => 
+            (team === 'crimson' && slot.role === role) ? { ...slot, player: newPlayer } : slot
+        )
+    };
 
-       const newCrimson = prev.crimsonTeam.map(slot => {
-          if (team === 'crimson' && slot.role === role) {
-             return { ...slot, player: newPlayer };
-          }
-          return slot;
-       });
+    setCurrentMatch(updatedMatch);
+    // Sync Reroll to URL
+    navigate('match', updatedMatch);
+  };
 
-       return {
-          ...prev,
-          azureTeam: newAzure,
-          crimsonTeam: newCrimson
-       };
-    });
+  const handleStartBattle = () => {
+     if (!currentMatch) return;
+     // Move to Battle Mode
+     navigate('battle', currentMatch);
   };
 
   const handleMatchFinish = (winner: 'azure' | 'crimson' | null, mvpId?: string, ratings?: Record<string, number>) => {
     if (!currentMatch) return;
     
-    // 1. Save History with Ratings
+    // Save History
     const historyEntry: MatchHistoryEntry = {
        ...currentMatch,
        id: crypto.randomUUID(),
        winningTeam: winner,
        mvpId: mvpId,
-       ratings: ratings // Store the ratings
+       ratings: ratings 
     };
     setMatchHistory(prev => [historyEntry, ...prev]);
 
-    // 2. Update Player Stats if there is a winner
+    // Update Player Stats
     if (winner) {
-      const azurePlayerIds = new Set(currentMatch.azureTeam.map(slot => slot.player.id));
-      const crimsonPlayerIds = new Set(currentMatch.crimsonTeam.map(slot => slot.player.id));
+      const azureIds = new Set(currentMatch.azureTeam.map(slot => slot.player.id));
+      const crimsonIds = new Set(currentMatch.crimsonTeam.map(slot => slot.player.id));
 
-      setPlayers(prevPlayers => prevPlayers.map(p => {
+      const updatedPlayers = players.map(p => {
         let isLastMatchMvp = false;
+        if (mvpId && p.id === mvpId) isLastMatchMvp = true;
 
-        // If player matches the manually provided MVP ID, set flag
-        if (mvpId && p.id === mvpId) {
-          isLastMatchMvp = true;
-        }
+        if (!azureIds.has(p.id) && !crimsonIds.has(p.id)) return { ...p, isLastMatchMvp: false };
 
-        if (!azurePlayerIds.has(p.id) && !crimsonPlayerIds.has(p.id)) {
-          return { ...p, isLastMatchMvp: false }; // Clear old MVP if they didn't play
-        }
-
-        const isAzure = azurePlayerIds.has(p.id);
+        const isAzure = azureIds.has(p.id);
         const isWinner = (isAzure && winner === 'azure') || (!isAzure && winner === 'crimson');
 
         const newStats = { ...p.stats };
@@ -223,294 +314,99 @@ export default function App() {
         if (isWinner) {
            newStats.wins += 1;
            newStats.currentStreak += 1;
-           if (newStats.currentStreak > newStats.maxStreak) {
-             newStats.maxStreak = newStats.currentStreak;
-           }
+           if (newStats.currentStreak > newStats.maxStreak) newStats.maxStreak = newStats.currentStreak;
         } else {
-           // Reset streak on loss
            newStats.currentStreak = 0;
         }
-
         return { ...p, stats: newStats, isLastMatchMvp };
-      }));
+      });
+      
+      setPlayers(updatedPlayers);
+      // Navigate back to Lobby with updated stats
+      navigate('lobby', updatedPlayers);
+    } else {
+      // Draw/Abandon
+      navigate('lobby', players);
     }
 
-    // 3. Clear match and Room ID (Reset ID)
     setCurrentMatch(null);
     setRoomId(''); 
   };
 
-  const handleAbortMatch = () => setCurrentMatch(null);
+  const handleAbortMatch = () => {
+      setCurrentMatch(null);
+      navigate('lobby', players);
+  };
+
+  // --- UTILS ---
 
   const quickFill = () => {
      const shuffledHeroes = [...HOK_HEROES].sort(() => 0.5 - Math.random());
      const heroesToAdd = shuffledHeroes.slice(0, 15);
-     const newPlayers: Player[] = heroesToAdd.map(hero => ({
-        id: crypto.randomUUID(),
+     const batchData = heroesToAdd.map(hero => ({
         name: hero.name,
-        isAllRoles: false,
         roles: hero.roles,
-        isActive: true,
-        isLastMatchMvp: false,
-        stats: { matchesPlayed: 0, wins: 0, currentStreak: 0, maxStreak: 0 }
+        isAllRoles: false,
+        action: 'add' as const
      }));
-     // Add some flexible minions/players if needed to ensure we have enough
      for(let i=0; i<5; i++) {
-        newPlayers.push({
-           id: crypto.randomUUID(),
-           name: `Flex Player ${i+1}`,
-           isAllRoles: true,
-           roles: [],
-           isActive: true,
-           isLastMatchMvp: false,
-           stats: { matchesPlayed: 0, wins: 0, currentStreak: 0, maxStreak: 0 }
-        });
+        batchData.push({ name: `Flex Player ${i+1}`, roles: [], isAllRoles: true, action: 'add' });
      }
-
-     // If Coach Mode is active, ensuring we have coaches
      if (isCoachMode) {
-        newPlayers.push(
-           {
-              id: crypto.randomUUID(),
-              name: "Coach Gemik",
-              isAllRoles: false,
-              roles: [Role.COACH],
-              isActive: true,
-              isLastMatchMvp: false,
-              stats: { matchesPlayed: 0, wins: 0, currentStreak: 0, maxStreak: 0 }
-           },
-           {
-              id: crypto.randomUUID(),
-              name: "Coach KPL",
-              isAllRoles: false,
-              roles: [Role.COACH],
-              isActive: true,
-              isLastMatchMvp: false,
-              stats: { matchesPlayed: 0, wins: 0, currentStreak: 0, maxStreak: 0 }
-           }
-        );
+        batchData.push({ name: "Coach Gemik", roles: [Role.COACH], isAllRoles: false, action: 'add' });
+        batchData.push({ name: "Coach KPL", roles: [Role.COACH], isAllRoles: false, action: 'add' });
      }
-     
-     setPlayers(prev => {
-        const existingNames = new Set(prev.map(p => p.name));
-        const filteredNew = newPlayers.filter(p => !existingNames.has(p.name));
-        return [...prev, ...filteredNew].slice(0, 30);
-     });
-     
-     // NOTE: We do NOT set Room ID automatically anymore per user request.
+     handleBatchProcess(batchData);
   };
 
-  // --- SAVE / LOAD FUNCTIONALITY ---
-  
-  const getFormattedTimestamp = () => {
-    const date = new Date();
-    const YYYY = date.getFullYear();
-    const MM = String(date.getMonth() + 1).padStart(2, '0');
-    const DD = String(date.getDate()).padStart(2, '0');
-    const HH = String(date.getHours()).padStart(2, '0');
-    const mm = String(date.getMinutes()).padStart(2, '0');
-    return `${YYYY}-${MM}-${DD}_${HH}-${mm}`;
-  };
-  
-  const handleExportRoster = () => {
-    if (players.length === 0) return;
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(players, null, 2));
-    const filename = `hok-squad-roster_${getFormattedTimestamp()}.json`;
-    
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", filename);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
-  };
+  // Fullscreen
+  useEffect(() => {
+    const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
 
-  const handleExportHistory = () => {
-    if (matchHistory.length === 0) return;
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(matchHistory, null, 2));
-    const filename = `hok-match-history_${getFormattedTimestamp()}.json`;
-
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", filename);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
-  };
-
-  const handleRosterImportClick = () => {
-    rosterFileInputRef.current?.click();
-  };
-
-  const handleHistoryImportClick = () => {
-    historyFileInputRef.current?.click();
-  };
-
-  const handleRosterFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const fileObj = event.target.files && event.target.files[0];
-    if (!fileObj) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const json = e.target?.result;
-        if (typeof json === 'string') {
-          const parsedData = JSON.parse(json);
-          // Basic validation
-          if (Array.isArray(parsedData) && parsedData.length > 0 && parsedData[0].name) {
-             const importedPlayers: Player[] = parsedData.map((p: any) => ({
-               ...p,
-               id: crypto.randomUUID(),
-               // Ensure properties exist for backward compatibility with old JSONs
-               isActive: typeof p.isActive === 'boolean' ? p.isActive : true,
-               isLastMatchMvp: typeof p.isLastMatchMvp === 'boolean' ? p.isLastMatchMvp : false,
-               stats: p.stats || { matchesPlayed: 0, wins: 0, currentStreak: 0, maxStreak: 0 }
-             }));
-             setPlayers(importedPlayers);
-             setErrorMsg(null);
-          } else {
-             setErrorMsg("Invalid Roster JSON file format.");
-          }
-        }
-      } catch (err) {
-        setErrorMsg("Failed to parse Roster JSON file.");
-      }
-    };
-    reader.readAsText(fileObj);
-    event.target.value = '';
-  };
-
-  const handleHistoryFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const fileObj = event.target.files && event.target.files[0];
-    if (!fileObj) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const json = e.target?.result;
-        if (typeof json === 'string') {
-          const parsedData = JSON.parse(json);
-          // Basic validation for match history
-          if (Array.isArray(parsedData) && (parsedData.length === 0 || parsedData[0].roomId)) {
-             setMatchHistory(parsedData);
-             setErrorMsg(null);
-          } else {
-             setErrorMsg("Invalid History JSON file format.");
-          }
-        }
-      } catch (err) {
-        setErrorMsg("Failed to parse History JSON file.");
-      }
-    };
-    reader.readAsText(fileObj);
-    event.target.value = '';
-  };
-
-  const handleRoomIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    // Only allow numeric input and max 4 digits
-    if (/^\d*$/.test(val) && val.length <= 4) {
-      setRoomId(val);
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => console.error(err));
+    } else {
+      if (document.exitFullscreen) document.exitFullscreen();
     }
   };
 
-  return (
-    <div className="min-h-screen text-slate-200 font-inter overflow-x-hidden relative">
-      <BackgroundParticles />
+  // --- RENDER ---
 
-      {/* New Background Image (HoK Global Launch) */}
-      <div className="fixed inset-0 bg-black -z-10">
-         <img 
-           src="https://www.levelinfinite.com/wp-content/uploads/2024/03/honor-of-kings-global-launch-pc.jpg" 
-           alt="Honor of Kings Background" 
-           className="absolute inset-0 w-full h-full object-cover opacity-50"
-         />
-         <div className="absolute inset-0 bg-gradient-to-b from-[#05090f]/90 via-[#05090f]/60 to-[#05090f] mix-blend-multiply"></div>
-         <div className="absolute inset-0 bg-gradient-to-t from-[#05090f] via-transparent to-[#05090f]/80"></div>
-      </div>
-      
-      {/* Hidden File Inputs */}
-      <input 
-        type="file" 
-        ref={rosterFileInputRef}
-        onChange={handleRosterFileChange}
-        accept=".json"
-        className="hidden"
-      />
-      <input 
-        type="file" 
-        ref={historyFileInputRef}
-        onChange={handleHistoryFileChange}
-        accept=".json"
-        className="hidden"
-      />
-
-      {/* Edit Modal */}
-      {editingPlayer && (
-        <EditPlayerModal 
-          player={editingPlayer}
-          isOpen={isEditModalOpen}
-          onClose={() => setIsEditModalOpen(false)}
-          onSave={handleUpdatePlayer}
-        />
-      )}
-
-      {/* Cinematic Header - Sticky & Compact - Only show in Lobby */}
-      {!currentMatch && (
-        <header className="sticky top-0 z-50 h-16 flex items-center justify-center border-b border-[#dcb06b]/20 bg-[#05090f]/90 backdrop-blur-md shadow-lg transition-all">
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#dcb06b]/5 to-transparent"></div>
-          <div className="flex items-center gap-2 animate-float">
-             <div className="w-6 h-6 border border-[#dcb06b] rotate-45 flex items-center justify-center bg-[#0a1a2f]">
-                <div className="w-3 h-3 bg-[#dcb06b]"></div>
-             </div>
-             <h1 className="text-xl font-cinzel font-black tracking-[0.2em] text-white flex flex-col md:flex-row md:items-center md:gap-2 leading-none">
-               <span>
-                 <span className="hok-gold-text">HONOR</span> OF <span className="hok-gold-text">KINGS</span>
-               </span>
-               <span className="text-[7px] text-[#8a9db8] tracking-[0.3em] font-orbitron md:mt-0 mt-1">OPEN MABAR</span>
-             </h1>
-          </div>
-        </header>
-      )}
-
-      <main className="relative z-10 pt-8 px-4 pb-20">
-        {currentMatch ? (
-          <MatchDisplay 
-            match={currentMatch} 
-            activePlayers={activePlayers} 
-            onReset={handleAbortMatch}
-            onCompleteMatch={handleMatchFinish}
-            onReroll={handleRerollSlot}
-          />
-        ) : (
-          <div className="max-w-7xl mx-auto">
-            
+  // Determine Main Content based on View Mode
+  let mainContent;
+  if (viewMode === 'lobby') {
+     mainContent = (
+        <div className="max-w-7xl mx-auto">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 relative transition-all duration-500">
-              
-              {/* Left Panel: Controls (Collapsible) */}
-              <div className={`
-                 lg:col-span-4 space-y-6 transition-all duration-500 ease-in-out
-                 ${isSidebarOpen ? 'opacity-100 translate-x-0' : 'hidden opacity-0 -translate-x-full lg:col-span-0'}
-              `}>
-
-                 {/* Room ID & Coach Mode Toggle */}
-                 <div className="bg-[#0a1a2f]/80 p-1 clip-corner-sm border border-[#1e3a5f] shadow-[0_0_25px_rgba(220,176,107,0.15)] relative group space-y-2">
-                    <div className="absolute -inset-1 bg-gradient-to-r from-transparent via-[#dcb06b]/30 to-transparent blur opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+              {/* Left Panel */}
+              <div className={`lg:col-span-4 space-y-6 transition-all duration-500 ease-in-out ${isSidebarOpen ? 'opacity-100 translate-x-0' : 'hidden opacity-0 -translate-x-full lg:col-span-0'}`}>
+                 
+                 {/* Room ID - HIGHLY VISIBLE UPDATE */}
+                 <div className="relative group p-[2px] rounded clip-corner-sm">
+                    {/* Animated Gold/Yellow Gradient Border/Glow */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#dcb06b] via-[#8a6d3b] to-[#dcb06b] animate-[spin-slow_4s_linear_infinite] opacity-80 blur-sm"></div>
                     
-                    <div className="bg-[#05090f] p-4 flex items-center gap-4 clip-corner-sm relative z-10">
-                       <label className="text-xs uppercase text-[#dcb06b] font-bold font-orbitron whitespace-nowrap tracking-widest">Room ID</label>
-                       <div className="h-8 w-[1px] bg-[#1e3a5f]"></div>
+                    <div className="bg-[#05090f] p-5 flex items-center gap-4 relative z-10 clip-corner-sm border border-[#dcb06b] shadow-[inset_0_0_20px_rgba(220,176,107,0.2)]">
+                       <label className="text-sm uppercase text-[#dcb06b] font-black font-orbitron whitespace-nowrap tracking-widest drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]">
+                          Room ID
+                       </label>
+                       <div className="h-8 w-[2px] bg-[#dcb06b] shadow-[0_0_10px_#dcb06b]"></div>
                        <input 
                           type="text" 
                           value={roomId}
-                          onChange={handleRoomIdChange}
+                          onChange={(e) => { if (/^\d*$/.test(e.target.value) && e.target.value.length <= 4) setRoomId(e.target.value); }}
                           maxLength={4}
                           placeholder="0000"
-                          className="bg-transparent text-lg font-orbitron text-white w-full focus:outline-none tracking-widest placeholder-[#1e3a5f]"
+                          className="bg-transparent text-2xl font-orbitron font-bold text-[#f3dcb1] w-full focus:outline-none tracking-[0.2em] placeholder-[#1e3a5f] drop-shadow-[0_0_5px_#dcb06b]"
                        />
                     </div>
                  </div>
 
+                 {/* Coach Mode */}
                  <div className="flex items-center justify-between bg-[#0a1a2f]/60 p-4 border border-[#1e3a5f] clip-corner-sm">
                      <span className="text-[#dcb06b] font-cinzel font-bold text-sm tracking-widest flex items-center gap-2">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -524,12 +420,10 @@ export default function App() {
                      </label>
                  </div>
 
-                 <PlayerForm onAddPlayer={addPlayer} isCoachMode={isCoachMode} />
+                 <PlayerForm onBatchProcess={handleBatchProcess} isCoachMode={isCoachMode} />
                  
-                 {/* Status Panel */}
                  <div className="relative p-6 clip-corner-md bg-gradient-to-b from-[#1a2c42] to-[#05090f] border border-[#dcb06b]/20 group hover:border-[#dcb06b]/50 transition-colors duration-500">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#dcb06b] to-transparent opacity-50"></div>
-                    
                     <div className="flex justify-between items-end mb-6">
                        <div>
                           <div className="text-[#8a9db8] text-[10px] uppercase tracking-widest font-bold mb-1">Active Players</div>
@@ -544,136 +438,122 @@ export default function App() {
                           </button>
                        </div>
                     </div>
-
-                    {errorMsg && (
-                      <div className="mb-4 p-3 border-l-2 border-red-500 bg-red-900/20 text-red-200 text-xs">
-                        {errorMsg}
-                      </div>
-                    )}
-
-                    <Button 
-                      onClick={handleGenerate} 
-                      className="w-full text-lg shadow-[0_0_20px_rgba(220,176,107,0.3)]"
-                      disabled={activePlayers.length < (isCoachMode ? 12 : 10)}
-                    >
+                    {errorMsg && <div className="mb-4 p-3 border-l-2 border-red-500 bg-red-900/20 text-red-200 text-xs">{errorMsg}</div>}
+                    <Button onClick={handleGenerate} className="w-full text-lg shadow-[0_0_20px_rgba(220,176,107,0.3)]" disabled={activePlayers.length < (isCoachMode ? 12 : 10)}>
                        START MATCHMAKING
                     </Button>
                  </div>
               </div>
 
-              {/* Right Panel: Player Grid & History */}
+              {/* Right Panel */}
               <div className={`transition-all duration-500 ${isSidebarOpen ? 'lg:col-span-8' : 'lg:col-span-12'}`}>
                  <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
-                    
-                    {/* Header with Expand Button */}
                     <div className="flex items-center gap-4">
-                        <button 
-                           onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
-                           className="p-2 border border-[#1e3a5f] hover:border-[#dcb06b] text-[#dcb06b] clip-corner-sm transition-all bg-[#0a1a2f]/50"
-                           title={isSidebarOpen ? "Maximize List" : "Show Controls"}
-                        >
+                        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 border border-[#1e3a5f] hover:border-[#dcb06b] text-[#dcb06b] clip-corner-sm transition-all bg-[#0a1a2f]/50">
                            {isSidebarOpen ? (
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                              </svg>
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
                            ) : (
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                              </svg>
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
                            )}
                         </button>
-
                         <h2 className="text-2xl font-cinzel font-black tracking-[0.2em] uppercase drop-shadow-sm text-[#dcb06b] flex items-center gap-3">
-                           <span className="w-2 h-2 bg-[#dcb06b] rotate-45"></span>
-                           SQUAD ROSTER
+                           <span className="w-2 h-2 bg-[#dcb06b] rotate-45"></span> SQUAD ROSTER
                         </h2>
                     </div>
-
                     <div className="flex items-center gap-2">
-                       {/* Import/Export Controls */}
-                       <button 
-                         onClick={handleRosterImportClick}
-                         className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-[#4a5f78] border border-[#1e3a5f] hover:border-[#dcb06b] hover:text-[#dcb06b] transition-all clip-corner-sm"
-                         title="Load Roster JSON"
-                       >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                          </svg>
+                       <button onClick={() => rosterFileInputRef.current?.click()} className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-[#4a5f78] border border-[#1e3a5f] hover:border-[#dcb06b] hover:text-[#dcb06b] transition-all clip-corner-sm">
                           Load
                        </button>
-
-                       <button 
-                         onClick={handleExportRoster}
-                         disabled={players.length === 0}
-                         className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-[#4a5f78] border border-[#1e3a5f] hover:border-[#dcb06b] hover:text-[#dcb06b] transition-all clip-corner-sm disabled:opacity-30 disabled:cursor-not-allowed"
-                         title="Save Roster JSON"
-                       >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                          </svg>
-                          Save
-                       </button>
-
                        <div className="h-4 w-[1px] bg-[#1e3a5f] mx-2"></div>
-
-                       <button onClick={() => setPlayers([])} className="text-xs text-[#4a5f78] hover:text-red-400 uppercase tracking-widest transition-colors">
-                          Clear All
-                       </button>
+                       <button onClick={handleClearAll} className="text-xs text-[#4a5f78] hover:text-red-400 uppercase tracking-widest transition-colors">Clear All</button>
                     </div>
                  </div>
                  
                  <div className="perspective-container tech-border p-6 bg-[#0a1a2f]/40 min-h-[400px] mb-8">
-                    <PlayerList 
-                      players={players} 
-                      onRemove={removePlayer} 
-                      onToggleActive={togglePlayerActive}
-                      onEdit={handleEditPlayer}
-                      isSidebarOpen={isSidebarOpen}
-                    />
+                    <PlayerList players={players} onRemove={removePlayer} onToggleActive={togglePlayerActive} onEdit={handleEditPlayer} isSidebarOpen={isSidebarOpen} />
                  </div>
 
-                 {/* MATCH HISTORY SECTION */}
                  <div className="mt-12">
                      <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-cinzel font-black tracking-[0.2em] uppercase drop-shadow-sm text-[#dcb06b] flex items-center gap-3">
-                           <span className="w-2 h-2 bg-[#dcb06b] rotate-45"></span>
-                           BATTLE HISTORY
+                           <span className="w-2 h-2 bg-[#dcb06b] rotate-45"></span> BATTLE HISTORY
                         </h2>
-                        
-                        <div className="flex items-center gap-2">
-                           <button 
-                             onClick={handleHistoryImportClick}
-                             className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-[#4a5f78] border border-[#1e3a5f] hover:border-[#dcb06b] hover:text-[#dcb06b] transition-all clip-corner-sm"
-                           >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                              </svg>
-                              Import
-                           </button>
-
-                           <button 
-                              onClick={handleExportHistory}
-                              disabled={matchHistory.length === 0}
-                              className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-[#4a5f78] border border-[#1e3a5f] hover:border-[#dcb06b] hover:text-[#dcb06b] transition-all clip-corner-sm disabled:opacity-30 disabled:cursor-not-allowed"
-                           >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                              Export
-                           </button>
-                        </div>
                      </div>
-
                      <div className="tech-border p-6 bg-[#0a1a2f]/40">
                         <HistoryList history={matchHistory} onClear={() => setMatchHistory([])} />
                      </div>
                  </div>
               </div>
-
             </div>
+        </div>
+     );
+  } else if (currentMatch) {
+     // Match or Battle Mode
+     mainContent = (
+        <MatchDisplay 
+          match={currentMatch} 
+          activePlayers={activePlayers} // Used for reroll pool
+          initialMode={viewMode === 'battle' ? 'battle' : 'draft'}
+          onReset={handleAbortMatch}
+          onCompleteMatch={handleMatchFinish}
+          onReroll={handleRerollSlot}
+          onStartBattle={handleStartBattle}
+        />
+     );
+  }
+
+  return (
+    <div className="min-h-screen text-slate-200 font-inter overflow-x-hidden relative flex flex-col">
+      <BackgroundParticles />
+      <div className="fixed inset-0 bg-black -z-10">
+         <img src="https://www.levelinfinite.com/wp-content/uploads/2024/03/honor-of-kings-global-launch-pc.jpg" alt="HoK" className="absolute inset-0 w-full h-full object-cover opacity-50" />
+         <div className="absolute inset-0 bg-gradient-to-b from-[#05090f]/90 via-[#05090f]/60 to-[#05090f] mix-blend-multiply"></div>
+      </div>
+      
+      {/* Hidden File Inputs */}
+      <input type="file" ref={rosterFileInputRef} onChange={(e) => {}} accept=".json" className="hidden" />
+      <input type="file" ref={historyFileInputRef} onChange={(e) => {}} accept=".json" className="hidden" />
+
+      {/* Edit Modal */}
+      {editingPlayer && (
+        <EditPlayerModal player={editingPlayer} isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} onSave={handleUpdatePlayer} />
+      )}
+
+      {/* Header - Only Show in Lobby */}
+      {viewMode === 'lobby' && (
+        <header className="sticky top-0 z-50 h-16 flex items-center justify-center border-b border-[#dcb06b]/20 bg-[#05090f]/90 backdrop-blur-md shadow-lg transition-all">
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#dcb06b]/5 to-transparent"></div>
+          
+          <div className="flex items-center gap-3 animate-float">
+             <div className="w-8 h-8 border-2 border-[#dcb06b] rotate-45 flex items-center justify-center bg-[#0a1a2f] shadow-[0_0_10px_#dcb06b]">
+                <div className="w-4 h-4 bg-[#dcb06b] shadow-inner"></div>
+             </div>
+             
+             <h1 className="text-2xl font-cinzel font-black tracking-[0.2em] text-white flex flex-col leading-none drop-shadow-[0_0_10px_rgba(220,176,107,0.5)]">
+               <span><span className="hok-gold-text">HONOR</span> OF <span className="hok-gold-text">KINGS</span></span>
+             </h1>
           </div>
-        )}
+          
+          <button onClick={toggleFullScreen} className="absolute right-4 sm:right-8 p-2 text-[#4a5f78] hover:text-[#dcb06b] transition-colors">
+             {isFullscreen ? <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg> : <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>}
+          </button>
+        </header>
+      )}
+
+      <main className="relative z-10 pt-8 px-4 flex-grow">
+         {mainContent}
       </main>
+
+      {/* Footer - Only in Lobby */}
+      {viewMode === 'lobby' && (
+        <footer className="relative z-10 py-4 mt-8 text-center border-t border-[#dcb06b]/10 bg-[#05090f] w-full">
+            <div className="max-w-4xl mx-auto px-4 text-[#4a5f78] font-orbitron text-[9px] tracking-widest leading-relaxed uppercase opacity-80">
+                <span className="block mb-1 text-[#dcb06b] font-bold">APPLICATION DEVELOPED BY KAZEHUNT</span>
+                <span className="block mb-1">DESIGNED EXCLUSIVELY FOR HONOR OF KINGS CUSTOM FUN MATCHES ON THE OFFICIAL DISCORD.</span>
+                <span className="block opacity-50 text-[8px]">THE DEVELOPER ASSUMES NO RESPONSIBILITY FOR USAGE OUTSIDE THIS INTENDED SCOPE.</span>
+            </div>
+        </footer>
+      )}
     </div>
   );
 }

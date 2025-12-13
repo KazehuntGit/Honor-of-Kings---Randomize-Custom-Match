@@ -18,6 +18,9 @@ export const SpinWheel: React.FC<SpinWheelProps> = ({ candidates, winnerName, on
   // Ref for the scroll container
   const reelRef = useRef<HTMLDivElement>(null);
   
+  // Ref to track the main animation timer so we can kill it on skip
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   // Configuration
   const ITEM_HEIGHT = 80; 
   const VISIBLE_ITEMS = 5; 
@@ -25,6 +28,13 @@ export const SpinWheel: React.FC<SpinWheelProps> = ({ candidates, winnerName, on
   const WINNER_INDEX = 150; 
 
   const [reelItems, setReelItems] = useState<string[]>([]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const items: string[] = [];
@@ -65,18 +75,23 @@ export const SpinWheel: React.FC<SpinWheelProps> = ({ candidates, winnerName, on
     setReelItems(items);
   }, [candidates, winnerName]);
 
+  const calculateTargetPosition = () => {
+    const containerHeight = ITEM_HEIGHT * VISIBLE_ITEMS;
+    const centerOffset = (containerHeight / 2) - (ITEM_HEIGHT / 2);
+    return -(WINNER_INDEX * ITEM_HEIGHT) + centerOffset;
+  };
+
   const handleLock = () => {
     if (status !== 'idle') return;
     setStatus('scrolling');
 
-    const containerHeight = ITEM_HEIGHT * VISIBLE_ITEMS;
-    const centerOffset = (containerHeight / 2) - (ITEM_HEIGHT / 2);
-    const targetY = -(WINNER_INDEX * ITEM_HEIGHT) + centerOffset;
-
+    const targetY = calculateTargetPosition();
     setScrollPosition(targetY);
 
-    setTimeout(() => {
+    // Set the main timer
+    timerRef.current = setTimeout(() => {
        setStatus('completed');
+       // Auto-close after a second if not skipped
        setTimeout(() => {
          onComplete();
        }, 1000);
@@ -84,12 +99,20 @@ export const SpinWheel: React.FC<SpinWheelProps> = ({ candidates, winnerName, on
   };
 
   const handleSkip = () => {
-     // Instantly jump to end
+     // 1. Kill the long animation timer immediately
+     if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+     }
+
+     // 2. Force status to completed (removes CSS transition)
      setStatus('completed');
-     const containerHeight = ITEM_HEIGHT * VISIBLE_ITEMS;
-     const centerOffset = (containerHeight / 2) - (ITEM_HEIGHT / 2);
-     const targetY = -(WINNER_INDEX * ITEM_HEIGHT) + centerOffset;
+     
+     // 3. Snap to target position immediately
+     const targetY = calculateTargetPosition();
      setScrollPosition(targetY);
+
+     // 4. Slight delay to let user see the result, then close
      setTimeout(() => {
          onComplete();
      }, 500);
@@ -102,7 +125,7 @@ export const SpinWheel: React.FC<SpinWheelProps> = ({ candidates, winnerName, on
       
       {/* Controls: Skip & Abort */}
       <div className="absolute top-6 right-6 z-50 flex gap-4">
-        {/* Skip Animation (Debug) */}
+        {/* Skip Animation */}
         {status === 'scrolling' && (
            <button 
              onClick={handleSkip}
@@ -128,10 +151,15 @@ export const SpinWheel: React.FC<SpinWheelProps> = ({ candidates, winnerName, on
         )}
       </div>
 
-      <div className="mb-8 text-center relative z-10 pointer-events-none select-none">
-        <div className="inline-block bg-[#05090f]/80 border border-[#dcb06b]/30 px-3 py-1 mb-2 clip-corner-sm">
-            <span className="text-[#dcb06b] font-orbitron text-xs tracking-[0.2em] font-bold">ROOM: {roomId}</span>
+      <div className="mb-8 text-center relative z-10 pointer-events-none select-none flex flex-col items-center">
+        {/* HIGHLIGHTED ROOM ID */}
+        <div className="relative group p-[1px] rounded clip-corner-sm mb-4">
+            <div className="absolute inset-0 bg-gradient-to-r from-[#dcb06b] via-[#8a6d3b] to-[#dcb06b] animate-[spin-slow_4s_linear_infinite] opacity-80 blur-sm"></div>
+            <div className="bg-[#05090f] px-6 py-2 relative z-10 clip-corner-sm border border-[#dcb06b] shadow-[inset_0_0_15px_rgba(220,176,107,0.2)]">
+                <span className="text-[#f3dcb1] font-orbitron text-sm tracking-[0.2em] font-bold drop-shadow-[0_0_5px_#dcb06b]">ROOM: {roomId}</span>
+            </div>
         </div>
+
         <h3 className="text-[#8a9db8] font-cinzel text-lg tracking-[0.3em] uppercase mb-1">
           Targeting Candidate
         </h3>
@@ -155,6 +183,9 @@ export const SpinWheel: React.FC<SpinWheelProps> = ({ candidates, winnerName, on
               className="w-full flex flex-col items-center will-change-transform"
               style={{
                 transform: `translateY(${scrollPosition}px)`,
+                // CSS Transition Logic:
+                // If scrolling, use the long duration.
+                // If completed (or idle), transition is 'none' so it snaps instantly.
                 transition: status === 'scrolling' 
                    ? `transform ${TOTAL_DURATION}ms cubic-bezier(0.1, 0, 0.1, 1)` 
                    : 'none',

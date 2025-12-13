@@ -3,12 +3,19 @@ import { Player, Role } from '../types';
 import { Button } from './Button';
 import { ROLES_ORDER } from '../constants';
 
+interface BatchItem {
+  name: string;
+  roles: Role[];
+  isAllRoles: boolean;
+  action: 'add' | 'bench';
+}
+
 interface PlayerFormProps {
-  onAddPlayer: (player: Omit<Player, 'id' | 'isActive' | 'stats'>) => void;
+  onBatchProcess: (items: BatchItem[]) => void;
   isCoachMode: boolean; // Received from App
 }
 
-export const PlayerForm: React.FC<PlayerFormProps> = ({ onAddPlayer, isCoachMode }) => {
+export const PlayerForm: React.FC<PlayerFormProps> = ({ onBatchProcess, isCoachMode }) => {
   const [mode, setMode] = useState<'manual' | 'smart'>('manual');
   
   // Manual State
@@ -51,11 +58,12 @@ export const PlayerForm: React.FC<PlayerFormProps> = ({ onAddPlayer, isCoachMode
     if (!name.trim()) return;
     if (!isAllRoles && selectedRoles.length === 0) return;
 
-    onAddPlayer({
+    onBatchProcess([{
       name: name.trim(),
       isAllRoles,
-      roles: isAllRoles ? [] : selectedRoles
-    });
+      roles: isAllRoles ? [] : selectedRoles,
+      action: 'add'
+    }]);
 
     // Reset
     setName('');
@@ -68,7 +76,7 @@ export const PlayerForm: React.FC<PlayerFormProps> = ({ onAddPlayer, isCoachMode
     if (!smartInput.trim()) return;
 
     const lines = smartInput.split(/\n/);
-    let count = 0;
+    const batchItems: BatchItem[] = [];
 
     lines.forEach(line => {
       // Clean line
@@ -84,34 +92,44 @@ export const PlayerForm: React.FC<PlayerFormProps> = ({ onAddPlayer, isCoachMode
 
       let pIsAllRoles = false;
       const pRoles: Role[] = [];
+      let pAction: 'add' | 'bench' = 'add';
 
-      // Detect All Role / Fill
-      if (pRoleStr.includes('all') || pRoleStr.includes('fill') || pRoleStr.includes('any') || pRoleStr.includes('auto')) {
-        pIsAllRoles = true;
+      // Detect STOP / BENCH / OUT
+      if (pRoleStr.includes('stop') || pRoleStr.includes('bench') || pRoleStr.includes('out') || pRoleStr.includes('afk')) {
+         pAction = 'bench';
       } else {
-        // Detect Specific Roles
-        if (pRoleStr.includes('clash') || pRoleStr.includes('exp') || pRoleStr.includes('fight')) pRoles.push(Role.CLASH);
-        if (pRoleStr.includes('mid') || pRoleStr.includes('mage')) pRoles.push(Role.MID);
-        if (pRoleStr.includes('jung') || pRoleStr.includes('jg') || pRoleStr.includes('assassin')) pRoles.push(Role.JUNGLE);
-        if (pRoleStr.includes('farm') || pRoleStr.includes('gold') || pRoleStr.includes('mm') || pRoleStr.includes('adc') || pRoleStr.includes('archer')) pRoles.push(Role.FARM);
-        if (pRoleStr.includes('roam') || pRoleStr.includes('supp') || pRoleStr.includes('tank')) pRoles.push(Role.ROAM);
-        
-        // Only allow Coach via smart paste if mode is enabled (optional strictness, but good for consistency)
-        if (isCoachMode && pRoleStr.includes('coach')) pRoles.push(Role.COACH);
+         // Detect All Role / Fill
+         if (pRoleStr.includes('all') || pRoleStr.includes('fill') || pRoleStr.includes('any') || pRoleStr.includes('auto')) {
+            pIsAllRoles = true;
+         } else {
+            // Detect Specific Roles
+            if (pRoleStr.includes('clash') || pRoleStr.includes('exp') || pRoleStr.includes('fight')) pRoles.push(Role.CLASH);
+            if (pRoleStr.includes('mid') || pRoleStr.includes('mage')) pRoles.push(Role.MID);
+            if (pRoleStr.includes('jung') || pRoleStr.includes('jg') || pRoleStr.includes('assassin')) pRoles.push(Role.JUNGLE);
+            if (pRoleStr.includes('farm') || pRoleStr.includes('gold') || pRoleStr.includes('mm') || pRoleStr.includes('adc') || pRoleStr.includes('archer')) pRoles.push(Role.FARM);
+            if (pRoleStr.includes('roam') || pRoleStr.includes('supp') || pRoleStr.includes('tank')) pRoles.push(Role.ROAM);
+            
+            // Only allow Coach via smart paste if mode is enabled
+            if (isCoachMode && pRoleStr.includes('coach')) pRoles.push(Role.COACH);
+         }
       }
 
       // Add if valid
-      if (pName && (pIsAllRoles || pRoles.length > 0)) {
-        onAddPlayer({
+      // Valid means: 
+      // 1. Has Name
+      // 2. AND (is 'bench' action OR has valid roles)
+      if (pName && (pAction === 'bench' || pIsAllRoles || pRoles.length > 0)) {
+        batchItems.push({
           name: pName,
           isAllRoles: pIsAllRoles,
-          roles: pRoles
+          roles: pRoles,
+          action: pAction
         });
-        count++;
       }
     });
 
-    if (count > 0) {
+    if (batchItems.length > 0) {
+      onBatchProcess(batchItems);
       setSmartInput('');
     }
   };
@@ -228,13 +246,13 @@ export const PlayerForm: React.FC<PlayerFormProps> = ({ onAddPlayer, isCoachMode
                  <textarea 
                   value={smartInput}
                   onChange={e => setSmartInput(e.target.value)}
-                  placeholder={`Supported Formats:\n\nArthur : Clash Lane\nLam - Jungle, Roam\nDiaochan : Mid Lane\nMarco Polo : Farm / Gold\nDolia : Roam, Support\nKPL Coach : Coach\nFaker : All Role\n\n(Separators: : or -)`}
+                  placeholder={`Examples:\nKaze : Clash Lane\nFaker : All Role\nKPL Coach : Coach\n\nUpdates:\nKaze : stop  (Benchs player)\nKaze : out   (Benchs player)`}
                   className="w-full h-48 bg-[#05090f] border border-[#1e3a5f] p-4 text-[#f0f4f8] placeholder-[#2d4a6d] focus:outline-none focus:border-[#dcb06b] transition-all clip-corner-sm font-orbitron tracking-wide text-sm resize-none"
                 />
                 <div className="absolute right-0 bottom-0 h-2 w-2 border-b border-r border-[#dcb06b] pointer-events-none"></div>
               </div>
               <p className="mt-2 text-[10px] text-[#4a5f78] italic">
-                Supported: Clash/Exp, Mid, Farm/Gold/MM, Jungle/Jg, Roam/Tank, Coach, All Role/Fill.
+                Commands: Use 'stop', 'bench', or 'out' to bench a player via Smart Paste.
               </p>
             </div>
             <Button type="submit" className="w-full" disabled={!smartInput.trim()}>
