@@ -1,15 +1,19 @@
+
 import React from 'react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'outline' | 'danger';
   size?: 'sm' | 'md' | 'lg';
+  disableSound?: boolean;
 }
 
 export const Button: React.FC<ButtonProps> = ({ 
   children, 
   variant = 'primary', 
-  size = 'md',
+  size = 'md', 
   className = '', 
+  disableSound = false,
+  onClick,
   ...props 
 }) => {
   const baseStyles = "relative font-cinzel font-bold transition-all duration-200 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale uppercase tracking-widest clip-corner-sm flex items-center justify-center";
@@ -47,9 +51,16 @@ export const Button: React.FC<ButtonProps> = ({
     `,
   };
 
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (onClick) {
+      onClick(e);
+    }
+  };
+
   return (
     <button 
       className={`${baseStyles} ${sizeStyles[size]} ${variants[variant]} ${className}`} 
+      onClick={handleClick}
       {...props}
     >
       {/* Internal shine effect */}

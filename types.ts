@@ -21,7 +21,8 @@ export interface Player {
   roles: Role[]; 
   isAllRoles: boolean;
   isActive: boolean; // Menandakan apakah pemain ikut match kali ini
-  isLastMatchMvp?: boolean; // New: Tracks if player was MVP in the specific last match
+  isLastMatchMvp?: boolean; // Tracks if player was MVP in the specific last match
+  lastMatchRating?: number; // New: Performa evaluasi terakhir (-2 s/d 2)
   stats: PlayerStats;
 }
 
@@ -35,6 +36,18 @@ export interface MatchResult {
   azureTeam: TeamSlot[];
   crimsonTeam: TeamSlot[];
   isCoachMode: boolean;
+  timestamp: number;
+}
+
+export interface BracketTeam {
+  name: string;
+  slots: TeamSlot[];
+  color: string;
+}
+
+export interface BracketMatchResult {
+  roomId: string;
+  teams: BracketTeam[];
   timestamp: number;
 }
 

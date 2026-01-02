@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Player, Role } from '../types';
@@ -16,42 +17,24 @@ type FilterType = 'ALL' | 'ACTIVE' | 'BENCH' | Role;
 export const PlayerList: React.FC<PlayerListProps> = ({ players, onRemove, onToggleActive, onEdit, isSidebarOpen = true }) => {
   const [filter, setFilter] = useState<FilterType>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Menu State (Only for Player Context Menu now)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
-  // Close menu when clicking outside
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-        setMenuOpenId(null);
-    };
-    const handleScroll = () => {
-        setMenuOpenId(null);
-    }; 
-
-    if (menuOpenId) {
-      document.addEventListener('click', handleClickOutside);
-      window.addEventListener('scroll', handleScroll, true);
-    }
-    return () => {
-      document.removeEventListener('click', handleClickOutside);
-      window.removeEventListener('scroll', handleScroll, true);
-    };
+    const handleClickOutside = () => setMenuOpenId(null);
+    if (menuOpenId) document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
   }, [menuOpenId]);
 
   const toggleMenu = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (menuOpenId === id) {
-        setMenuOpenId(null);
-    } else {
-        const rect = e.currentTarget.getBoundingClientRect();
-        setMenuPosition({
-            top: rect.bottom + 5,
-            left: rect.right - 128
-        });
-        setMenuOpenId(id);
-    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenuPosition({ top: rect.bottom + 5, left: rect.right - 128 });
+    setMenuOpenId(menuOpenId === id ? null : id);
+  };
+
+  const handleFilterClick = (val: string) => {
+      setFilter(val as FilterType);
   };
 
   const filteredPlayers = players.filter(p => {
@@ -59,23 +42,16 @@ export const PlayerList: React.FC<PlayerListProps> = ({ players, onRemove, onTog
     if (filter === 'ACTIVE') matchesCategory = p.isActive;
     else if (filter === 'BENCH') matchesCategory = !p.isActive;
     else if (Object.values(Role).includes(filter as Role)) {
-       matchesCategory = p.roles.includes(filter as Role);
+       const targetRole = filter as Role;
+       matchesCategory = p.roles.includes(targetRole) || (p.isAllRoles && targetRole !== Role.COACH);
     }
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
 
-  const filters: { label: string; value: FilterType; icon?: React.ReactNode }[] = [
-    { label: 'All', value: 'ALL' },
-    { label: 'Playing', value: 'ACTIVE' },
-    { label: 'Benched', value: 'BENCH' },
-    ...ROLES_ORDER.map(r => ({ label: r.split(' ')[0], value: r })),
-    { label: 'Coach', value: Role.COACH }
-  ];
-
   const getRoleBadgeStyle = (role: Role) => {
       switch (role) {
-          case Role.COACH: return 'text-white border-white bg-white/10 shadow-[0_0_10px_rgba(255,255,255,0.5)]';
+          case Role.COACH: return 'text-white border-white bg-white/10';
           case Role.CLASH: return 'text-orange-400 border-orange-500/50 bg-orange-900/20'; 
           case Role.JUNGLE: return 'text-emerald-400 border-emerald-500/50 bg-emerald-900/20'; 
           case Role.MID: return 'text-blue-400 border-blue-500/50 bg-blue-900/20'; 
@@ -85,248 +61,160 @@ export const PlayerList: React.FC<PlayerListProps> = ({ players, onRemove, onTog
       }
   };
 
-  if (players.length === 0) {
-    return (
-      <div className="h-full min-h-[300px] flex flex-col items-center justify-center border border-dashed border-[#1e3a5f] rounded-lg bg-[#0a1a2f]/30 p-8">
-        <div className="w-20 h-20 rounded-full bg-[#1e3a5f]/50 flex items-center justify-center mb-4 border border-[#dcb06b]/20">
-           <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-[#dcb06b]/50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+  const renderRatingArrows = (rating: number) => {
+    if (!rating || rating === 0) return null;
+    
+    // Pastikan panah dirender dua kali jika nilai mutlaknya adalah 2
+    if (rating > 0) {
+      return (
+        <div className="flex flex-col -space-y-1.5 ml-1 text-green-400 items-center justify-center">
+           <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>
+           {Math.abs(rating) === 2 && <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>}
         </div>
-        <p className="text-[#8a9db8] font-cinzel tracking-widest text-sm">Waiting for Challengers</p>
-      </div>
-    );
-  }
+      );
+    } else {
+      return (
+        <div className="flex flex-col -space-y-1.5 ml-1 text-red-500 items-center justify-center">
+           {Math.abs(rating) === 2 && <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>}
+           <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+        </div>
+      );
+    }
+  };
 
-  // Adjusted Grid Logic: 3xN when Sidebar Open
-  const gridClasses = isSidebarOpen
-      ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3" 
-      : "grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6";
+  const gridClasses = isSidebarOpen ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3" : "grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6";
 
   return (
     <div>
-      {/* FILTER & SEARCH BAR */}
       <div className="mb-6 flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between">
-         
-         {/* Filter Horizontal Scroll List (1x9) */}
          <div className="w-full xl:flex-1 overflow-x-auto pb-2">
              <div className="flex gap-2 min-w-max">
-                {filters.map(f => (
-                  <button
-                    key={f.value}
-                    onClick={() => setFilter(f.value)}
-                    className={`
-                      flex items-center justify-center px-4 py-2 text-[10px] uppercase font-bold tracking-wider clip-corner-sm border transition-all
-                      ${filter === f.value 
-                          ? 'bg-[#dcb06b] text-[#05090f] border-[#dcb06b] shadow-[0_0_10px_#dcb06b] scale-105' 
-                          : 'bg-[#05090f] text-[#8a9db8] border-[#1e3a5f] hover:border-[#dcb06b] hover:text-white hover:bg-[#1e3a5f]/30'}
-                    `}
-                  >
-                    {f.label}
+                {['ALL', 'ACTIVE', 'BENCH', ...ROLES_ORDER, Role.COACH].map(val => (
+                  <button key={val} onClick={() => handleFilterClick(val)} className={`px-4 py-2 text-[10px] uppercase font-bold tracking-wider clip-corner-sm border transition-all ${filter === val ? 'bg-[#dcb06b] text-[#05090f] border-[#dcb06b]' : 'bg-[#05090f] text-[#8a9db8] border-[#1e3a5f] hover:border-[#dcb06b]'}`}>
+                    {val.split(' ')[0]}
                   </button>
                 ))}
              </div>
          </div>
-
-         <div className="relative w-full xl:w-64 shrink-0">
-             <input 
-               type="text" 
-               placeholder="Find Player..." 
-               value={searchQuery}
-               onChange={(e) => setSearchQuery(e.target.value)}
-               className="w-full bg-[#05090f] border border-[#1e3a5f] px-3 py-1.5 pl-8 text-xs text-[#f0f4f8] focus:outline-none focus:border-[#dcb06b] clip-corner-sm font-orbitron placeholder-[#4a5f78]"
-             />
-             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 absolute left-2 top-1.5 text-[#4a5f78]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-             </svg>
+         <div className="relative w-full xl:w-64">
+             <input type="text" placeholder="Find Player..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-[#05090f] border border-[#1e3a5f] px-3 py-1.5 pl-8 text-xs text-white focus:outline-none focus:border-[#dcb06b] clip-corner-sm font-orbitron"/>
+             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 absolute left-2 top-1.5 text-[#4a5f78]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
          </div>
       </div>
 
-      {/* PLAYER GRID */}
-      <div className={`grid gap-3 transition-all duration-500 ${gridClasses}`}>
+      <div className={`grid gap-3 ${gridClasses}`}>
         {filteredPlayers.map(player => {
-          const isActive = player.isActive;
-          const stats = player.stats || { matchesPlayed: 0, wins: 0, currentStreak: 0, maxStreak: 0 };
-          const winRate = stats.matchesPlayed > 0 
-            ? Math.round((stats.wins / stats.matchesPlayed) * 100) 
-            : 0;
-          
-          const streak = stats.currentStreak;
-          const isHot = streak >= 3 && streak < 6; 
-          const isGodlike = streak >= 6;
+          const ws = player.stats.currentStreak || 0;
           const isMvp = player.isLastMatchMvp;
-          const hasCoachRole = player.roles.includes(Role.COACH);
-
-          // --- ANIMATED BORDER LOGIC ---
+          const isCoach = player.roles.includes(Role.COACH);
+          
           let animationLayer = null;
-          let glowClass = "";
+          let glowColor = '';
+          let primaryColor = '';
 
-          if (isActive) {
-              if (isMvp) {
-                  glowClass = "drop-shadow-[0_0_15px_rgba(251,191,36,0.6)]";
-                  animationLayer = (
-                      <div className="absolute inset-[-50%] bg-[conic-gradient(from_0deg,transparent_0deg,#fbbf24_90deg,transparent_180deg,#fbbf24_270deg,transparent_360deg)] animate-[spin_4s_linear_infinite] opacity-100"></div>
-                  );
-              } else if (hasCoachRole) {
-                  glowClass = "drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]";
-                  animationLayer = (
-                      <div className="absolute inset-[-50%] bg-[conic-gradient(from_0deg,transparent_0deg,#ffffff_90deg,transparent_180deg,#ffffff_270deg,transparent_360deg)] animate-[spin_6s_linear_infinite] opacity-80"></div>
-                  );
-              } else if (isGodlike) {
-                  glowClass = "drop-shadow-[0_0_20px_rgba(239,68,68,0.8)]";
-                  animationLayer = (
-                      <div className="absolute inset-[-50%] bg-[conic-gradient(from_0deg,transparent_0deg,#ef4444_60deg,#7f1d1d_120deg,transparent_180deg,#ef4444_240deg,transparent_360deg)] animate-[spin_2s_linear_infinite] opacity-100"></div>
-                  );
-              } else if (isHot) {
-                  glowClass = "drop-shadow-[0_0_10px_rgba(6,182,212,0.6)]";
-                  animationLayer = (
-                      <div className="absolute inset-[-50%] bg-[conic-gradient(from_0deg,transparent_0deg,#06b6d4_90deg,transparent_180deg,#06b6d4_270deg,transparent_360deg)] animate-[spin_3s_linear_infinite] opacity-100"></div>
-                  );
-              }
+          // Hirarki Status & Warna Trace Border
+          if (player.isActive) {
+            if (isMvp) {
+              primaryColor = '#fbbf24'; // Emas
+              glowColor = 'drop-shadow-[0_0_12px_#fbbf24]';
+            } else if (isCoach) {
+              primaryColor = '#ffffff'; // Putih
+              glowColor = 'drop-shadow-[0_0_12px_rgba(255,255,255,0.6)]';
+            } else if (ws >= 2) {
+              if (ws >= 5) primaryColor = '#ef4444'; // Merah
+              else if (ws >= 4) primaryColor = '#f97316'; // Oren
+              else if (ws >= 3) primaryColor = '#a855f7'; // Ungu
+              else primaryColor = '#00d2ff'; // Biru Cyan
+              
+              glowColor = `drop-shadow-[0_0_10px_${primaryColor}]`;
+            }
+
+            if (primaryColor) {
+               animationLayer = (
+                 <div 
+                   className="absolute inset-[-150%] animate-[spin_4s_linear_infinite]"
+                   style={{
+                     background: `conic-gradient(from 0deg, ${primaryColor} 0deg, ${primaryColor} 40deg, transparent 40deg, transparent 180deg, ${primaryColor} 180deg, ${primaryColor} 220deg, transparent 220deg, transparent 360deg)`
+                   }}
+                 />
+               );
+            }
           }
 
-          const cardBg = isActive && hasCoachRole ? 'bg-[#000000]' : 'bg-[#05090f]';
-
           return (
-            <React.Fragment key={player.id}>
-              {menuOpenId === player.id && createPortal(
-                <div 
-                   className="fixed z-[9999] w-32 bg-[#05090f] border border-[#dcb06b] shadow-[0_0_20px_rgba(0,0,0,0.9)] clip-corner-sm flex flex-col animate-slide-in"
-                   style={{ 
-                      top: menuPosition.top, 
-                      left: menuPosition.left 
-                   }}
-                   onClick={(e) => e.stopPropagation()}
-                >
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); onToggleActive(player.id); setMenuOpenId(null); }}
-                      className="px-3 py-3 text-left text-[10px] uppercase font-bold text-[#f0f4f8] hover:bg-[#dcb06b] hover:text-[#05090f] transition-colors"
-                    >
-                       {isActive ? 'Bench Player' : 'Activate'}
-                    </button>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); onEdit(player); setMenuOpenId(null); }}
-                      className="px-3 py-3 text-left text-[10px] uppercase font-bold text-[#f0f4f8] hover:bg-[#dcb06b] hover:text-[#05090f] transition-colors"
-                    >
-                       Edit Details
-                    </button>
-                    <div className="h-[1px] bg-[#1e3a5f] w-full"></div>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); onRemove(player.id); setMenuOpenId(null); }}
-                      className="px-3 py-3 text-left text-[10px] uppercase font-bold text-red-500 hover:bg-red-500 hover:text-white transition-colors"
-                    >
-                       Remove
-                    </button>
-                 </div>,
-                 document.body
-              )}
-
-              <div className={`relative group ${glowClass} tilt-card h-full transition-all duration-300 min-h-[90px]`}>
+            <div key={player.id} className={`relative group h-full transition-all duration-300 min-h-[90px] ${glowColor}`}>
+              {/* Animated Border Background */}
+              <div className="absolute inset-0 clip-corner-sm overflow-hidden z-0 bg-[#1e3a5f]/20">
+                 {animationLayer}
+              </div>
+              
+              {/* Inner Card content */}
+              <div className={`absolute inset-[2px] clip-corner-sm z-10 flex flex-col p-2 ${player.isActive ? (isCoach ? 'bg-[#000000]' : 'bg-[#05090f]') : 'bg-[#05090f]/80 grayscale backdrop-blur-sm'}`}>
                 
-                <div className="absolute inset-0 clip-corner-sm overflow-hidden z-0">
-                    <div className="absolute inset-0 bg-[#1e3a5f]"></div>
-                    {animationLayer}
+                {/* BENCHED STAMP - Only for inactive players */}
+                {!player.isActive && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none overflow-hidden">
+                        <div className="absolute inset-0 bg-red-900/10 mix-blend-overlay"></div>
+                        <div className="rotate-[-15deg] border-4 border-red-600/80 px-4 py-1 text-red-600/90 font-black text-2xl tracking-[0.3em] uppercase bg-black/40 backdrop-blur-sm shadow-[0_0_20px_rgba(220,38,38,0.4)] animate-pulse-fast">
+                            BENCHED
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex justify-between items-start mb-2 relative z-10">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1">
+                      <div className={`text-lg font-bold font-orbitron truncate ${isMvp ? 'text-yellow-400' : 'text-white'}`}>{player.name}</div>
+                      {player.isActive && renderRatingArrows(player.lastMatchRating || 0)}
+                    </div>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {isCoach ? (
+                        <span className="text-[7px] border border-white text-white px-1.5 py-0.5 rounded uppercase font-black bg-white/10">COACH</span>
+                      ) : player.isAllRoles ? (
+                        <span className="text-[7px] border border-purple-500 text-purple-400 px-1 py-0.5 rounded uppercase">All Roles</span>
+                      ) : (
+                        player.roles.map(r => <span key={r} className={`text-[7px] border px-1 py-0.5 rounded uppercase ${getRoleBadgeStyle(r)}`}>{r.split(' ')[0]}</span>)
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Status Mini-Tags */}
+                  <div className="flex flex-col items-end gap-1">
+                    <button onClick={(e) => toggleMenu(e, player.id)} className="p-1 text-[#4a5f78] hover:text-[#dcb06b] mb-1">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
+                    </button>
+
+                    <div className="flex flex-col gap-1 items-end">
+                       {/* MVP Mini-Tag */}
+                       {isMvp && player.isActive && (
+                         <div className="px-2 py-0.5 text-[8px] font-black uppercase tracking-tighter bg-[#fbbf24] text-black clip-corner-sm shadow-[0_0_8px_rgba(251,191,36,0.6)]">
+                            MVP
+                         </div>
+                       )}
+
+                       {/* Win Streak Mini-Tag */}
+                       {ws >= 2 && player.isActive && (
+                         <div 
+                           className="px-2 py-0.5 text-[8px] font-black uppercase tracking-tighter text-white clip-corner-sm shadow-md"
+                           style={{ backgroundColor: primaryColor }}
+                         >
+                            {ws} WS
+                         </div>
+                       )}
+                    </div>
+                  </div>
                 </div>
 
-                <div 
-                  className={`
-                    absolute inset-[1px] clip-corner-sm z-10 flex flex-col p-2
-                    ${cardBg}
-                    ${!isActive ? 'opacity-50 grayscale hover:opacity-80 transition-opacity' : ''}
-                  `}
-                >
-                  
-                  <div className="flex justify-between items-start gap-2 mb-2">
-                     
-                     <div className="flex-1 min-w-0">
-                        {/* Name */}
-                        <div className="flex items-center gap-2 mb-1">
-                            <div 
-                                className={`text-lg font-bold font-orbitron tracking-wide leading-none truncate ${isMvp ? 'text-yellow-400' : 'text-[#e2e8f0]'}`}
-                                title={player.name}
-                            >
-                                {player.name}
-                            </div>
-                            
-                            {/* Badges */}
-                            {isMvp && <div className="text-[8px] font-black bg-gradient-to-r from-yellow-400 to-yellow-600 text-black px-1.5 py-0.5 rounded-sm shadow-[0_0_10px_#fbbf24] animate-pulse">MVP</div>}
-                            
-                            {!isMvp && isGodlike && isActive && (
-                               <span className="text-[8px] text-red-500 animate-pulse font-black">GODLIKE</span>
-                            )}
-                        </div>
-
-                        <div className="flex flex-wrap gap-1">
-                            {hasCoachRole ? (
-                                <div className={`px-1.5 py-0.5 border clip-corner-sm ${getRoleBadgeStyle(Role.COACH)}`}>
-                                    <span className="text-[7px] uppercase font-bold leading-none whitespace-nowrap opacity-100">
-                                        COACH
-                                    </span>
-                                </div>
-                            ) : (
-                                // Standard Role Rendering
-                                player.isAllRoles ? (
-                                  <div className={`px-1.5 py-0.5 border clip-corner-sm bg-purple-900/20 text-purple-400 border-purple-500/30`}>
-                                    <span className="text-[8px] font-bold uppercase whitespace-nowrap">All Roles</span>
-                                  </div>
-                                ) : (
-                                  player.roles.map(role => (
-                                      <div key={role} className={`px-1.5 py-0.5 border clip-corner-sm ${getRoleBadgeStyle(role)}`}>
-                                          <span className="text-[7px] uppercase font-bold leading-none whitespace-nowrap opacity-100">
-                                              {role.split(' ')[0]}
-                                          </span>
-                                      </div>
-                                  ))
-                                )
-                            )}
-                        </div>
-                     </div>
-
-                     <div className="relative shrink-0">
-                        <button 
-                           onClick={(e) => toggleMenu(e, player.id)}
-                           className={`p-1 text-[#4a5f78] hover:text-[#dcb06b] hover:bg-white/5 transition-colors rounded`}
-                        >
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                           </svg>
-                        </button>
-                     </div>
-                  </div>
-
-                  {/* Stats - Force visibility with explicit colors and background separation */}
-                  <div className="mt-auto pt-2 border-t border-[#1e3a5f] bg-[#000000]/20 flex items-center justify-between text-[9px] font-mono px-1 pb-0.5 rounded-b-sm">
-                      <div className="flex items-center gap-2">
-                         <span className="text-[#8a9db8]">MATCH:</span>
-                         <span className="text-white font-bold">{stats.matchesPlayed}</span>
-                      </div>
-                      
-                      <div className="h-3 w-[1px] bg-[#1e3a5f]"></div>
-
-                      <div className="flex items-center gap-2">
-                         <span className="text-[#8a9db8]">WR:</span>
-                         <span className={`font-bold ${winRate >= 60 ? 'text-[#dcb06b]' : winRate >= 50 ? 'text-white' : 'text-red-400'}`}>
-                            {winRate}%
-                         </span>
-                      </div>
-                  </div>
-
-                  {/* Streak Overlay (if any) */}
-                  {streak > 1 && isActive && (
-                     <div className={`absolute top-0 right-8 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-wider ${isGodlike ? 'bg-red-900/80 text-red-200' : 'bg-cyan-900/80 text-cyan-200'} clip-corner-sm`}>
-                        {streak} WS
-                     </div>
-                  )}
-                  
-                  {!isActive && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                      <span className="text-[#0a1a2f] font-black text-xl -rotate-12 opacity-40 uppercase tracking-widest select-none bg-[#dcb06b] px-1 mix-blend-screen">Benched</span>
-                    </div>
-                  )}
+                <div className="mt-auto flex justify-between text-[9px] font-mono border-t border-white/5 pt-1 relative z-10">
+                  <span className="text-[#8a9db8]">Matches: <span className="text-white">{player.stats.matchesPlayed}</span></span>
+                  <span className="text-[#8a9db8]">WR: <span className="text-white">{player.stats.matchesPlayed > 0 ? Math.round((player.stats.wins/player.stats.matchesPlayed)*100) : 0}%</span></span>
                 </div>
               </div>
-            </React.Fragment>
+            </div>
           );
         })}
       </div>
+      {menuOpenId && createPortal(<div className="fixed z-[9999] w-32 bg-[#05090f] border border-[#dcb06b] clip-corner-sm flex flex-col shadow-2xl" style={{ top: menuPosition.top, left: menuPosition.left }} onClick={e => e.stopPropagation()}><button onClick={() => { onToggleActive(menuOpenId); }} className="px-3 py-3 text-left text-[10px] uppercase font-bold text-white hover:bg-[#dcb06b] hover:text-black transition-colors">Toggle Active</button><button onClick={() => { onEdit(players.find(p => p.id === menuOpenId)!); }} className="px-3 py-3 text-left text-[10px] uppercase font-bold text-white hover:bg-[#dcb06b] hover:text-black transition-colors">Edit</button><button onClick={() => { onRemove(menuOpenId); }} className="px-3 py-3 text-left text-[10px] uppercase font-bold text-red-500 hover:bg-red-500 hover:text-white transition-colors">Remove</button></div>, document.body)}
     </div>
   );
 };
