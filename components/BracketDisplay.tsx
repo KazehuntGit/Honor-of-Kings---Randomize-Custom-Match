@@ -398,38 +398,18 @@ export const BracketDisplay: React.FC<BracketDisplayProps> = ({ match, onReset, 
   const handleNextReveal = () => {
     if (!activeMatchData) return;
     
-    // Logic to find the next valid role/side combo
-    let targetRoleIdx = currentRoleIdx;
-    let targetSide: 'azure' | 'crimson' = 'azure'; // Default
-    
-    // If starting fresh
-    if (targetRoleIdx === -1) {
-        targetRoleIdx = 0;
-        targetSide = 'azure';
-    } else {
-        const currentRole = ROLES_ORDER[targetRoleIdx];
-        const azureId = `m${currentMatchIdx}-A-${currentRole}`;
-        
-        // If Azure for current role is NOT revealed, target it
-        if (!revealedSlots.has(azureId)) {
-            targetSide = 'azure';
-        } else {
-            // Azure is revealed. Check if we need to reveal Crimson
-            const crimsonId = `m${currentMatchIdx}-B-${currentRole}`;
-            if (!revealedSlots.has(crimsonId)) {
-                targetSide = 'crimson';
-            } else {
-                 // Both revealed, move to next role Azure
-                 targetRoleIdx++;
-                 targetSide = 'azure';
-            }
-        }
-    }
+    // FIX: Deterministic next slot logic based on currentRoleIdx
+    // currentRoleIdx tracks the last FULLY COMPLETED role row (both Azure & Crimson revealed)
+    // So we always look at currentRoleIdx + 1 to find the current active row.
+    const targetRoleIdx = currentRoleIdx + 1;
 
-    if (targetRoleIdx >= ROLES_ORDER.length) return; // Done
+    if (targetRoleIdx >= ROLES_ORDER.length) return; // All roles done
 
     const role = ROLES_ORDER[targetRoleIdx];
-    const side = targetSide;
+    const azureId = `m${currentMatchIdx}-A-${role}`;
+    
+    // If Azure is not revealed, it's Azure's turn. Otherwise Crimson's.
+    const side: 'azure' | 'crimson' = !revealedSlots.has(azureId) ? 'azure' : 'crimson';
 
     // --- Proceed to reveal this slot ---
     const teamData = side === 'azure' ? activeMatchData.teamA : activeMatchData.teamB;
@@ -452,7 +432,7 @@ export const BracketDisplay: React.FC<BracketDisplayProps> = ({ match, onReset, 
         }
     }
 
-    // --- CANDIDATE GENERATION LOGIC UPDATE ---
+    // --- CANDIDATE GENERATION LOGIC ---
     
     // Calculate known taken players to exclude from spin wheel candidates
     const knownTakenIds = new Set<string>();
@@ -477,15 +457,12 @@ export const BracketDisplay: React.FC<BracketDisplayProps> = ({ match, onReset, 
 
     // 2. From current session revealed slots
     revealedSlots.forEach(slotKey => {
-         // slotKey format: m{matchIdx}-{Side}-{role}
-         // We can extract team and role to find player ID
          const parts = slotKey.match(/^m(\d+)-([AB])-(.+)$/);
          if (parts) {
              const mIdx = parseInt(parts[1]);
-             // Since revealedSlots are reset per match, this typically only contains current match data
              if (mIdx === currentMatchIdx) {
                  const sideCode = parts[2];
-                 const r = parts[3]; // Role string (should match enum since we construct it)
+                 const r = parts[3]; 
                  const mData = activeMatchData; 
                  if (mData) {
                      const team = sideCode === 'A' ? mData.teamA : mData.teamB;
@@ -508,7 +485,7 @@ export const BracketDisplay: React.FC<BracketDisplayProps> = ({ match, onReset, 
     });
 
     const candidateNames = candidates.map(p => p.name);
-    // Ensure winner is always in the pool (they aren't in knownTakenIds yet because we haven't revealed this slot)
+    // Ensure winner is always in the pool
     if (!candidateNames.includes(winner.name)) candidateNames.push(winner.name);
     
     const randomDuration = Math.floor(Math.random() * (9000 - 4500 + 1)) + 4500;
